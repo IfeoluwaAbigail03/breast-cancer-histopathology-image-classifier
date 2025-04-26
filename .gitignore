@@ -1,0 +1,12 @@
+__pycache__/ 
+*.py[cod] 
+.venv/ 
+.env/ 
+.DS_Store 
+*.pkl 
+*.h5 
+.pytest_cache/ 
+.tox/ 
+.coverage 
+.idea/ 
+*.log 
