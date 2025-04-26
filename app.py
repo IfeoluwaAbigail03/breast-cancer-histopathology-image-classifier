@@ -2,9 +2,7 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
-from pathlib import Path
-import os
-import requests
+import gdown
 import tempfile
 
 # 1. Define Custom Layer (MUST match training exactly)
@@ -18,23 +16,16 @@ class L2Normalize(tf.keras.layers.Layer):
 # 2. Robust Model Loading (from Google Drive)
 @st.cache_resource
 def load_model():
-    MODEL_URL = "https://drive.google.com/uc?export=download&id=1r-8OcG1ggLx5KnNLudPbMJbWw1pc9z_l"
+    MODEL_URL = "https://drive.google.com/uc?id=1r-8OcG1ggLx5KnNLudPbMJbWw1pc9z_l"  # Correct Google Drive URL
     
-    # Download model
-    try:
-        response = requests.get(MODEL_URL)
-        response.raise_for_status()
-    except Exception as e:
-        st.error(f"❌ Failed to download model: {str(e)}")
-        return None
-
     # Save to a temporary file
     temp_model_file = tempfile.NamedTemporaryFile(delete=False, suffix=".keras")
-    temp_model_file.write(response.content)
-    temp_model_file.flush()
-
-    # Try to load model
+    
+    # Download model using gdown
     try:
+        gdown.download(MODEL_URL, temp_model_file.name, quiet=False)
+        
+        # Try to load model
         model = tf.keras.models.load_model(
             temp_model_file.name,
             custom_objects={'L2Normalize': L2Normalize},
@@ -43,7 +34,7 @@ def load_model():
         st.success("✅ Model downloaded and loaded successfully!")
         return model
     except Exception as e:
-        st.error(f"❌ Failed to load model: {str(e)}")
+        st.error(f"❌ Failed to download or load model: {str(e)}")
         return None
 
 # 3. Streamlit UI Configuration
