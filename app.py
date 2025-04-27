@@ -1,11 +1,10 @@
 import streamlit as st
 import tensorflow as tf
-import numpy as np
-from PIL import Image
+import requests
 import tempfile
 import os
-import shutil
-import requests
+from PIL import Image
+import numpy as np
 
 # ======================
 # 1. CUSTOM LAYER DEFINITION
@@ -17,31 +16,38 @@ class L2Normalize(tf.keras.layers.Layer):
         return tf.math.l2_normalize(inputs, axis=-1)
 
 # ======================
-# 2. MODEL CONFIGURATION
+# 2. GITHUB MODEL LOADER
 # ======================
-MODEL_CONFIG = {
-    "model_url": "https://raw.githubusercontent.com/IfeoluwaAbigail03/breast-cancer-histopathology-image-classifier/master/breast_cancer_classifier_FIXED.keras",
-    "input_shape": (128, 128, 3),
-    "class_names": ["Benign", "Malignant"]
-}
-
-# =====================
-# 3. MODEL LOADING
-# =====================
 @st.cache_resource
 def load_model():
+    """Robust model loader with GitHub LFS support"""
     try:
-        # Setup temp directory
+        # GitHub configuration
+        MODEL_URL = "https://github.com/IfeoluwaAbigail03/breast-cancer-histopathology-image-classifier/raw/master/breast_cancer_classifier_FIXED.keras"
+        EXPECTED_SIZE = 265411495  # From your earlier test
+        
+        # Create temp directory
         temp_dir = tempfile.mkdtemp()
         model_path = os.path.join(temp_dir, "model.keras")
         
-        # Download model
-        response = requests.get(MODEL_CONFIG['model_url'], stream=True)
-        if response.status_code == 200:
+        # Download with LFS headers
+        headers = {
+            "Accept": "application/octet-stream",
+            "User-Agent": "Streamlit-App"
+        }
+        
+        with st.spinner("Downloading model from GitHub..."):
+            response = requests.get(MODEL_URL, headers=headers, stream=True)
+            response.raise_for_status()
+            
+            # Save with progress
             with open(model_path, 'wb') as f:
-                f.write(response.content)
-        else:
-            raise Exception("Failed to download model. Check the URL.")
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        
+        # Verify download
+        if os.path.getsize(model_path) < EXPECTED_SIZE * 0.9:
+            raise ValueError("Downloaded file too small - might be LFS pointer")
         
         # Load model
         model = tf.keras.models.load_model(
@@ -50,10 +56,7 @@ def load_model():
             compile=False
         )
         
-        # Verify model structure
-        if model.input.shape[1:] != MODEL_CONFIG["input_shape"]:
-            raise ValueError("Model input shape mismatch")
-            
+        st.success("✅ Model loaded successfully!")
         return model
         
     except Exception as e:
@@ -61,20 +64,23 @@ def load_model():
         ❌ Model loading failed: {str(e)}
         
         Troubleshooting:
-        1. Verify the model URL is correct: {MODEL_CONFIG['model_url']}
-        2. Check TensorFlow version matches training environment
+        1. Verify the file exists at: {MODEL_URL}
+        2. Check Git LFS is tracking the file
+        3. Try manual download to confirm
         """)
         return None
     finally:
-        # Clean up temp directory
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
+        # Clean up temp files
+        if 'temp_dir' in locals() and os.path.exists(temp_dir):
+            for root, dirs, files in os.walk(temp_dir, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+            os.rmdir(temp_dir)
 
-# =====================
-# 4. STREAMLIT APP
-# =====================
+# ======================
+# 3. STREAMLIT APP
+# ======================
 def main():
-    # Configure page
     st.set_page_config(
         page_title="Breast Cancer Classifier",
         page_icon="🔬",
@@ -89,9 +95,20 @@ def main():
     if not model:
         st.stop()
     
+    # Image processing
+    def preprocess_image(upload):
+        try:
+            img = Image.open(upload).convert('RGB')
+            img = img.resize((128, 128))  # Match your model's input shape
+            img_array = np.array(img) / 255.0
+            return np.expand_dims(img_array, axis=0).astype(np.float32)
+        except Exception as e:
+            st.error(f"Image processing failed: {str(e)}")
+            return None
+    
     # File uploader
     upload = st.file_uploader(
-        "Choose mammogram image", 
+        "Choose mammogram image",
         type=["jpg", "jpeg", "png"]
     )
     
@@ -104,11 +121,9 @@ def main():
         with cols[1]:
             with st.spinner("Analyzing..."):
                 try:
-                    # Preprocess image
-                    img = Image.open(upload).convert('RGB')
-                    img = img.resize(MODEL_CONFIG["input_shape"][:2])
-                    img_array = np.array(img) / 255.0
-                    img_array = np.expand_dims(img_array, axis=0).astype(np.float32)
+                    img_array = preprocess_image(upload)
+                    if img_array is None:
+                        st.stop()
                     
                     # Predict
                     pred = model.predict(img_array, verbose=0)[0]
@@ -127,21 +142,15 @@ def main():
                         **Benign Probability:** {benign_prob:.1%}
                         """)
                     
-                    # Confidence meter
+                    # Confidence visualization
                     st.progress(int(malignant_prob * 100))
                     
-                    # Detailed breakdown
-                    with st.expander("Detailed Results"):
-                        st.write(f"Benign: {benign_prob:.4f}")
-                        st.write(f"Malignant: {malignant_prob:.4f}")
-                    
                 except Exception as e:
-                    st.error(f"Analysis failed: {str(e)}")
+                    st.error(f"Prediction failed: {str(e)}")
 
 if __name__ == "__main__":
     # Configure TensorFlow to be quiet
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     tf.get_logger().setLevel('ERROR')
-    os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
     
     main()
