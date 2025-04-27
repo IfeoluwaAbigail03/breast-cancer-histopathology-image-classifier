@@ -2,10 +2,10 @@ import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
-import gdown
 import tempfile
 import os
 import shutil
+import requests
 
 # ======================
 # 1. CUSTOM LAYER DEFINITION
@@ -20,8 +20,7 @@ class L2Normalize(tf.keras.layers.Layer):
 # 2. MODEL CONFIGURATION
 # ======================
 MODEL_CONFIG = {
-    "drive_id": "1r-8OcG1ggLx5KnNLudPbMJbWw1pc9z_l",
-    "expected_size": 265411495,  # Exact size from your test
+    "model_url": "https://raw.githubusercontent.com/IfeoluwaAbigail03/breast-cancer-histopathology-image-classifier/master/breast_cancer_classifier_FIXED.keras",
     "input_shape": (128, 128, 3),
     "class_names": ["Benign", "Malignant"]
 }
@@ -37,15 +36,12 @@ def load_model():
         model_path = os.path.join(temp_dir, "model.keras")
         
         # Download model
-        url = f"https://drive.google.com/uc?id={MODEL_CONFIG['drive_id']}"
-        gdown.download(url, model_path, quiet=False)
-        
-        # Verify download
-        if not os.path.exists(model_path):
-            raise FileNotFoundError("File not downloaded")
-            
-        if os.path.getsize(model_path) != MODEL_CONFIG["expected_size"]:
-            raise ValueError("File size mismatch - possibly corrupted")
+        response = requests.get(MODEL_CONFIG['model_url'], stream=True)
+        if response.status_code == 200:
+            with open(model_path, 'wb') as f:
+                f.write(response.content)
+        else:
+            raise Exception("Failed to download model. Check the URL.")
         
         # Load model
         model = tf.keras.models.load_model(
@@ -65,9 +61,8 @@ def load_model():
         ❌ Model loading failed: {str(e)}
         
         Troubleshooting:
-        1. Verify the file is accessible: {url}
+        1. Verify the model URL is correct: {MODEL_CONFIG['model_url']}
         2. Check TensorFlow version matches training environment
-        3. Try converting model to .h5 format
         """)
         return None
     finally:
